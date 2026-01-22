@@ -6,15 +6,21 @@ import sys
 import random
 
 # Game Constants
+WINDOW_WIDTH = 800  # Fixed window width
+WINDOW_HEIGHT = 800  # Fixed window height
 GRID_SIZE = 20  # Size of each grid cell in pixels
 DEFAULT_BOARD_COLS = 20  # Default number of columns (horizontal cells)
 DEFAULT_BOARD_ROWS = 20  # Default number of rows (vertical cells)
+MIN_BOARD_SIZE = 6  # Minimum board size
+MAX_BOARD_SIZE = 32  # Maximum board size
 
 # These will be set dynamically based on user selection
 BOARD_COLS = DEFAULT_BOARD_COLS
 BOARD_ROWS = DEFAULT_BOARD_ROWS
-WINDOW_WIDTH = BOARD_COLS * GRID_SIZE
-WINDOW_HEIGHT = BOARD_ROWS * GRID_SIZE
+
+# Offset to center the board in the window (will be calculated dynamically)
+OFFSET_X = 0
+OFFSET_Y = 0
 
 # Colors (RGB)
 BLACK = (0, 0, 0)
@@ -105,8 +111,8 @@ class Snake:
         """Draw the snake on the screen"""
         for segment in self.body:
             rect = pygame.Rect(
-                segment[0] * GRID_SIZE,
-                segment[1] * GRID_SIZE,
+                OFFSET_X + segment[0] * GRID_SIZE,
+                OFFSET_Y + segment[1] * GRID_SIZE,
                 GRID_SIZE - 2,
                 GRID_SIZE - 2
             )
@@ -131,8 +137,8 @@ class Food:
     def draw(self, screen):
         """Draw the food on the screen"""
         rect = pygame.Rect(
-            self.position[0] * GRID_SIZE,
-            self.position[1] * GRID_SIZE,
+            OFFSET_X + self.position[0] * GRID_SIZE,
+            OFFSET_Y + self.position[1] * GRID_SIZE,
             GRID_SIZE - 2,
             GRID_SIZE - 2
         )
@@ -141,10 +147,17 @@ class Food:
 
 def draw_grid(screen):
     """Draw grid lines for better visibility"""
-    for x in range(0, WINDOW_WIDTH, GRID_SIZE):
-        pygame.draw.line(screen, GRAY, (x, 0), (x, WINDOW_HEIGHT))
-    for y in range(0, WINDOW_HEIGHT, GRID_SIZE):
-        pygame.draw.line(screen, GRAY, (0, y), (WINDOW_WIDTH, y))
+    board_pixel_width = BOARD_COLS * GRID_SIZE
+    board_pixel_height = BOARD_ROWS * GRID_SIZE
+
+    for x in range(0, board_pixel_width + 1, GRID_SIZE):
+        pygame.draw.line(screen, GRAY,
+                        (OFFSET_X + x, OFFSET_Y),
+                        (OFFSET_X + x, OFFSET_Y + board_pixel_height))
+    for y in range(0, board_pixel_height + 1, GRID_SIZE):
+        pygame.draw.line(screen, GRAY,
+                        (OFFSET_X, OFFSET_Y + y),
+                        (OFFSET_X + board_pixel_width, OFFSET_Y + y))
 
 
 def draw_text(screen, text, size, x, y, color=WHITE):
@@ -159,45 +172,56 @@ def draw_text(screen, text, size, x, y, color=WHITE):
 def draw_mode_selection(screen, selected_mode, cursor_position, board_cols, board_rows):
     """Draw mode selection screen with cursor"""
     screen.fill(BLACK)
-    draw_text(screen, "GAME SETTINGS", 72, 300, 80)
-    draw_text(screen, "Arrow keys, ENTER on mode to start", 24, 300, 130, GRAY)
 
-    # Classic mode
-    classic_color = WHITE if selected_mode == CLASSIC else GRAY
+    # Center x position
+    center_x = WINDOW_WIDTH // 2
+
+    # Title
+    draw_text(screen, "SNAKE GAME", 72, center_x, 120)
+    draw_text(screen, "Arrow keys, ENTER on mode to start", 24, center_x, 180, GRAY)
+
+    # Mode selection section
+    draw_text(screen, "GAME MODE", 48, center_x, 260, WHITE)
+
+    # Classic mode (highlight only when cursor is on it)
     cursor_classic = "> " if cursor_position == 0 else "  "
-    draw_text(screen, cursor_classic + "CLASSIC MODE", 42, 300, 200, classic_color)
+    classic_color = WHITE if cursor_position == 0 else GRAY
+    draw_text(screen, cursor_classic + "CLASSIC MODE", 38, center_x, 320, classic_color)
 
-    # Relaxed mode
-    relaxed_color = WHITE if selected_mode == RELAXED else GRAY
+    # Relaxed mode (highlight only when cursor is on it)
     cursor_relaxed = "> " if cursor_position == 1 else "  "
-    draw_text(screen, cursor_relaxed + "RELAXED MODE", 42, 300, 260, relaxed_color)
+    relaxed_color = WHITE if cursor_position == 1 else GRAY
+    draw_text(screen, cursor_relaxed + "RELAXED MODE", 38, center_x, 370, relaxed_color)
 
-    # Grid settings box
-    pygame.draw.rect(screen, GRAY, (150, 320, 300, 120), 2)
-    draw_text(screen, "BOARD SIZE", 36, 300, 350, WHITE)
+    # Board size section
+    draw_text(screen, "BOARD SIZE", 48, center_x, 470, WHITE)
+
+    # Draw box around board size options
+    box_rect = pygame.Rect(center_x - 150, 510, 300, 90)
+    pygame.draw.rect(screen, GRAY, box_rect, 2)
 
     # Board columns (horizontal cells)
     cursor_cols = "> " if cursor_position == 2 else "  "
     cols_color = WHITE if cursor_position == 2 else GRAY
-    draw_text(screen, cursor_cols + f"Columns: {board_cols} cells", 32, 300, 390, cols_color)
+    draw_text(screen, cursor_cols + f"Columns: {board_cols} cells", 32, center_x, 530, cols_color)
 
     # Board rows (vertical cells)
     cursor_rows = "> " if cursor_position == 3 else "  "
     rows_color = WHITE if cursor_position == 3 else GRAY
-    draw_text(screen, cursor_rows + f"Rows:    {board_rows} cells", 32, 300, 420, rows_color)
+    draw_text(screen, cursor_rows + f"Rows:    {board_rows} cells", 32, center_x, 580, rows_color)
 
     pygame.display.flip()
 
 
 def main():
     """Main game function"""
-    global BOARD_COLS, BOARD_ROWS, WINDOW_WIDTH, WINDOW_HEIGHT
+    global BOARD_COLS, BOARD_ROWS, OFFSET_X, OFFSET_Y
 
     # Initialize Pygame
     pygame.init()
 
     # Create initial window for settings
-    screen = pygame.display.set_mode((600, 500))
+    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     pygame.display.set_caption("Simple Snake Game - Settings")
 
     # Create clock for controlling frame rate
@@ -237,38 +261,34 @@ def main():
 
                 elif event.key == pygame.K_LEFT:
                     if cursor_position == 2:  # Board columns
-                        board_cols = max(10, board_cols - 1)
+                        board_cols = max(MIN_BOARD_SIZE, board_cols - 1)
                     elif cursor_position == 3:  # Board rows
-                        board_rows = max(10, board_rows - 1)
+                        board_rows = max(MIN_BOARD_SIZE, board_rows - 1)
 
                 elif event.key == pygame.K_RIGHT:
                     if cursor_position == 2:  # Board columns
-                        board_cols = min(50, board_cols + 1)
+                        board_cols = min(MAX_BOARD_SIZE, board_cols + 1)
                     elif cursor_position == 3:  # Board rows
-                        board_rows = min(50, board_rows + 1)
+                        board_rows = min(MAX_BOARD_SIZE, board_rows + 1)
 
                 elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
                     # Only start game if on mode selection (position 0 or 1)
                     if cursor_position == 0 or cursor_position == 1:
                         selecting_mode = False
-                    # If on grid size (position 2 or 3), update window size
-                    elif cursor_position == 2 or cursor_position == 3:
-                        # Update window size immediately
-                        temp_width = board_cols * GRID_SIZE
-                        temp_height = board_rows * GRID_SIZE
-                        screen = pygame.display.set_mode((max(600, temp_width), max(500, temp_height)))
-                        pygame.display.set_caption("Simple Snake Game - Settings")
 
         clock.tick(60)
 
     # Update global grid settings
     BOARD_COLS = board_cols
     BOARD_ROWS = board_rows
-    WINDOW_WIDTH = BOARD_COLS * GRID_SIZE
-    WINDOW_HEIGHT = BOARD_ROWS * GRID_SIZE
 
-    # Recreate window with correct size
-    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    # Calculate offset to center the board
+    board_pixel_width = BOARD_COLS * GRID_SIZE
+    board_pixel_height = BOARD_ROWS * GRID_SIZE
+    OFFSET_X = (WINDOW_WIDTH - board_pixel_width) // 2
+    OFFSET_Y = (WINDOW_HEIGHT - board_pixel_height) // 2
+
+    # Window is already correct size (800x800)
     pygame.display.set_caption("Simple Snake Game")
 
     mode = selected_mode
@@ -276,7 +296,7 @@ def main():
     # Create game objects
     snake = Snake()
     food = Food()
-    score = 0
+    score = 1
 
     # Game state
     game_over = False
@@ -307,7 +327,7 @@ def main():
                     if event.key == pygame.K_SPACE:
                         snake = Snake()
                         food = Food()
-                        score = 0
+                        score = 1
                         game_over = False
 
             if not game_over:
@@ -321,7 +341,7 @@ def main():
                     # Make sure food doesn't spawn on snake
                     while food.position in snake.body:
                         food.randomize_position()
-                    score += 10
+                    score += 1
 
                 # Check collisions
                 if snake.check_collision():
@@ -390,7 +410,7 @@ def main():
                                     # Make sure food doesn't spawn on snake
                                     while food.position in snake.body:
                                         food.randomize_position()
-                                    score += 10
+                                    score += 1
                             # If can't move, just ignore the input (don't move, don't game over)
 
                 # Restart game on SPACE when game over
@@ -398,7 +418,7 @@ def main():
                     if event.key == pygame.K_SPACE:
                         snake = Snake()
                         food = Food()
-                        score = 0
+                        score = 1
                         game_over = False
 
             # Clear screen
