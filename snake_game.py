@@ -157,6 +157,51 @@ class Food:
         pygame.draw.rect(screen, RED, rect)
 
 
+def reset_game():
+    """Create new snake and food, return initial game state"""
+    snake = Snake()
+    food = Food()
+    while food.position in snake.body:
+        food.randomize_position()
+    return snake, food
+
+
+def draw_overlay_menu(screen, title, menu_position, subtitle=None):
+    """Draw game over or game complete overlay menu"""
+    center_x = WINDOW_WIDTH // 2
+    center_y = WINDOW_HEIGHT // 2
+
+    draw_text(screen, title, 72, center_x, center_y - 80)
+
+    if subtitle:
+        draw_text(screen, subtitle, 48, center_x, center_y - 20)
+        y_base = center_y + 40
+    else:
+        y_base = center_y + 20
+
+    restart_color = WHITE if menu_position == 0 else GRAY
+    menu_color = WHITE if menu_position == 1 else GRAY
+    cursor_restart = "> " if menu_position == 0 else "  "
+    cursor_menu = "> " if menu_position == 1 else "  "
+
+    draw_text(screen, cursor_restart + "Restart", 36, center_x, y_base, restart_color)
+    draw_text(screen, cursor_menu + "Main Menu", 36, center_x, y_base + 40, menu_color)
+    draw_text(screen, "Press R to restart, ENTER to confirm", 24, center_x, y_base + 90, GRAY)
+
+
+def handle_menu_input(event, menu_position):
+    """Handle menu input. Returns (new_menu_position, action)
+    action: None, 'restart', or 'main_menu'
+    """
+    if event.key in (pygame.K_UP, pygame.K_DOWN):
+        return 1 - menu_position, None
+    elif event.key == pygame.K_RETURN:
+        return menu_position, "restart" if menu_position == 0 else "main_menu"
+    elif event.key == pygame.K_r:
+        return menu_position, "restart"
+    return menu_position, None
+
+
 def draw_grid(screen):
     """Draw grid lines for better visibility"""
     board_pixel_width = BOARD_COLS * GRID_SIZE
@@ -332,369 +377,113 @@ def main():
     mode = selected_mode
 
     # Create game objects
-    snake = Snake()
-    food = Food()
-    # Make sure food doesn't spawn on snake's initial position
-    while food.position in snake.body:
-        food.randomize_position()
+    snake, food = reset_game()
     score = 1
 
     # Game state
     game_over = False
-    game_over_menu_position = 0  # 0=restart, 1=main menu
     game_complete = False
-    complete_menu_position = 0  # 0=restart, 1=main menu
+    menu_position = 0  # 0=restart, 1=main menu
     running = True
+    last_move_time = pygame.time.get_ticks()
 
-    # Game loop
-    if mode == CLASSIC:
-        # Classic mode: automatic movement with timed intervals
-        last_move_time = pygame.time.get_ticks()
-        while running:
-            # Handle events
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
+    # Unified game loop
+    while running:
+        should_move = False
+        direction_input = None
 
-                # Handle keyboard input (Classic mode - direction change only)
-                if event.type == pygame.KEYDOWN and not game_over and not game_complete:
-                    if event.key == pygame.K_UP:
-                        snake.change_direction(UP)
-                    elif event.key == pygame.K_DOWN:
-                        snake.change_direction(DOWN)
-                    elif event.key == pygame.K_LEFT:
-                        snake.change_direction(LEFT)
-                    elif event.key == pygame.K_RIGHT:
-                        snake.change_direction(RIGHT)
-                    elif event.key == pygame.K_q:
-                        # Q key triggers game over
-                        game_over = True
-                        game_over_menu_position = 0
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
 
-                # Handle game over menu
-                if event.type == pygame.KEYDOWN and game_over:
-                    if event.key == pygame.K_UP or event.key == pygame.K_DOWN:
-                        game_over_menu_position = 1 - game_over_menu_position
-                    elif event.key == pygame.K_RETURN:
-                        if game_over_menu_position == 0:  # Restart
-                            snake = Snake()
-                            food = Food()
-                            while food.position in snake.body:
-                                food.randomize_position()
-                            score = 1
-                            game_over = False
-                            game_over_menu_position = 0
-                            last_move_time = pygame.time.get_ticks()
-                        else:  # Main menu
-                            return
-                    elif event.key == pygame.K_r:
-                        # R key restarts regardless of cursor position
-                        snake = Snake()
-                        food = Food()
-                        while food.position in snake.body:
-                            food.randomize_position()
+            if event.type == pygame.KEYDOWN:
+                # Handle menu input when game over or complete
+                if game_over or game_complete:
+                    menu_position, action = handle_menu_input(event, menu_position)
+                    if action == "restart":
+                        snake, food = reset_game()
                         score = 1
                         game_over = False
-                        game_over_menu_position = 0
-                        last_move_time = pygame.time.get_ticks()
-
-                # Handle game complete menu
-                if event.type == pygame.KEYDOWN and game_complete:
-                    if event.key == pygame.K_UP or event.key == pygame.K_DOWN:
-                        complete_menu_position = 1 - complete_menu_position
-                    elif event.key == pygame.K_RETURN:
-                        if complete_menu_position == 0:  # Restart
-                            snake = Snake()
-                            food = Food()
-                            while food.position in snake.body:
-                                food.randomize_position()
-                            score = 1
-                            game_complete = False
-                            complete_menu_position = 0
-                            last_move_time = pygame.time.get_ticks()
-                        else:  # Main menu
-                            return  # Return to main menu (restart main function)
-                    elif event.key == pygame.K_r:
-                        # R key restarts regardless of cursor position
-                        snake = Snake()
-                        food = Food()
-                        while food.position in snake.body:
-                            food.randomize_position()
-                        score = 1
                         game_complete = False
-                        complete_menu_position = 0
+                        menu_position = 0
                         last_move_time = pygame.time.get_ticks()
+                    elif action == "main_menu":
+                        return
+                else:
+                    # Handle game input
+                    if event.key == pygame.K_UP:
+                        direction_input = UP
+                    elif event.key == pygame.K_DOWN:
+                        direction_input = DOWN
+                    elif event.key == pygame.K_LEFT:
+                        direction_input = LEFT
+                    elif event.key == pygame.K_RIGHT:
+                        direction_input = RIGHT
+                    elif event.key == pygame.K_q:
+                        game_over = True
+                        menu_position = 0
 
-            if not game_over:
-                # Move snake automatically at timed intervals (Classic mode)
+                    # Mode-specific direction handling
+                    if direction_input and not game_over:
+                        if mode == CLASSIC:
+                            snake.change_direction(direction_input)
+                        elif mode == RELAXED:
+                            if snake.change_direction(direction_input):
+                                if snake.can_move(direction_input):
+                                    should_move = True
+
+        # Movement logic
+        if not game_over and not game_complete:
+            if mode == CLASSIC:
                 current_time = pygame.time.get_ticks()
                 if current_time - last_move_time >= SNAKE_MOVE_INTERVAL:
-                    # Check if next position has food (grow before moving)
-                    next_head = (snake.body[0][0] + snake.direction[0],
-                                snake.body[0][1] + snake.direction[1])
-                    if next_head == food.position:
-                        snake.grow()
-
-                    snake.move()
+                    should_move = True
                     last_move_time = current_time
 
-                    # If food was eaten, check if board is full or spawn new food
-                    if snake.body[0] == food.position:
-                        score += 1
-                        # Check if board is completely filled
-                        if len(snake.body) >= BOARD_COLS * BOARD_ROWS:
-                            game_complete = True
-                            complete_menu_position = 0
-                        else:
-                            food.randomize_position()
-                            # Make sure food doesn't spawn on snake
-                            while food.position in snake.body:
-                                food.randomize_position()
+            if should_move:
+                # Check if next position has food
+                next_head = (snake.body[0][0] + snake.direction[0],
+                            snake.body[0][1] + snake.direction[1])
+                if next_head == food.position:
+                    snake.grow()
 
-                    # Check collisions
-                    if snake.check_collision():
-                        game_over = True
-                        game_over_menu_position = 0
+                snake.move()
 
-            # Clear screen
-            screen.fill(BLACK)
-
-            # Draw grid
-            draw_grid(screen)
-
-            # Draw game objects
-            snake.draw(screen)
-            if not game_complete:
-                food.draw(screen)
-
-            # Draw score and mode
-            draw_text(screen, f"Score: {score}", 36, WINDOW_WIDTH // 2, 30)
-            draw_text(screen, f"Mode: {mode.upper()}", 28, 80, WINDOW_HEIGHT - 20, GRAY)
-
-            # Draw game over message
-            if game_over:
-                draw_text(
-                    screen, "GAME OVER!", 72, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 80
-                )
-
-                # Menu options
-                restart_color = WHITE if game_over_menu_position == 0 else GRAY
-                menu_color = WHITE if game_over_menu_position == 1 else GRAY
-                cursor_restart = "> " if game_over_menu_position == 0 else "  "
-                cursor_menu = "> " if game_over_menu_position == 1 else "  "
-
-                draw_text(
-                    screen, cursor_restart + "Restart", 36, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 20, restart_color
-                )
-                draw_text(
-                    screen, cursor_menu + "Main Menu", 36, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 60, menu_color
-                )
-                draw_text(
-                    screen, "Press R to restart, ENTER to confirm", 24, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 110, GRAY
-                )
-
-            # Draw game complete message
-            if game_complete:
-                draw_text(
-                    screen, "CONGRATULATIONS!", 72, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 80
-                )
-                draw_text(
-                    screen, "Board Complete!", 48, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 20
-                )
-
-                # Menu options
-                restart_color = WHITE if complete_menu_position == 0 else GRAY
-                menu_color = WHITE if complete_menu_position == 1 else GRAY
-                cursor_restart = "> " if complete_menu_position == 0 else "  "
-                cursor_menu = "> " if complete_menu_position == 1 else "  "
-
-                draw_text(
-                    screen, cursor_restart + "Restart", 36, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 40, restart_color
-                )
-                draw_text(
-                    screen, cursor_menu + "Main Menu", 36, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 80, menu_color
-                )
-                draw_text(
-                    screen, "Press R to restart, ENTER to confirm", 24, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 130, GRAY
-                )
-
-            # Update display
-            pygame.display.flip()
-
-            # Control frame rate
-            clock.tick(FPS)
-
-    elif mode == RELAXED:
-        # Relaxed mode: move only on key press
-        while running:
-            # Handle events
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-
-                # Handle keyboard input (Relaxed mode - move on key press)
-                if event.type == pygame.KEYDOWN and not game_over and not game_complete:
-                    new_direction = None
-                    if event.key == pygame.K_UP:
-                        new_direction = UP
-                    elif event.key == pygame.K_DOWN:
-                        new_direction = DOWN
-                    elif event.key == pygame.K_LEFT:
-                        new_direction = LEFT
-                    elif event.key == pygame.K_RIGHT:
-                        new_direction = RIGHT
-                    elif event.key == pygame.K_q:
-                        # Q key triggers game over
-                        game_over = True
-                        game_over_menu_position = 0
-
-                    # Move snake only if direction is valid and movement is possible
-                    if new_direction and not game_over:
-                        # Check if direction change is valid (not 180 degrees)
-                        if snake.change_direction(new_direction):
-                            # Check if snake can move in this direction (not into wall or itself)
-                            if snake.can_move(new_direction):
-                                # Check if next position has food (grow before moving)
-                                next_head = (snake.body[0][0] + new_direction[0],
-                                            snake.body[0][1] + new_direction[1])
-                                if next_head == food.position:
-                                    snake.grow()
-
-                                snake.move()
-
-                                # If food was eaten, check if board is full or spawn new food
-                                if snake.body[0] == food.position:
-                                    score += 1
-                                    # Check if board is completely filled
-                                    if len(snake.body) >= BOARD_COLS * BOARD_ROWS:
-                                        game_complete = True
-                                        complete_menu_position = 0
-                                    else:
-                                        food.randomize_position()
-                                        # Make sure food doesn't spawn on snake
-                                        while food.position in snake.body:
-                                            food.randomize_position()
-                            # If can't move, just ignore the input (don't move, don't game over)
-
-                # Handle game over menu
-                if event.type == pygame.KEYDOWN and game_over:
-                    if event.key == pygame.K_UP or event.key == pygame.K_DOWN:
-                        game_over_menu_position = 1 - game_over_menu_position
-                    elif event.key == pygame.K_RETURN:
-                        if game_over_menu_position == 0:  # Restart
-                            snake = Snake()
-                            food = Food()
-                            while food.position in snake.body:
-                                food.randomize_position()
-                            score = 1
-                            game_over = False
-                            game_over_menu_position = 0
-                        else:  # Main menu
-                            return
-                    elif event.key == pygame.K_r:
-                        # R key restarts regardless of cursor position
-                        snake = Snake()
-                        food = Food()
+                # Check if food was eaten
+                if snake.body[0] == food.position:
+                    score += 1
+                    if len(snake.body) >= BOARD_COLS * BOARD_ROWS:
+                        game_complete = True
+                        menu_position = 0
+                    else:
+                        food.randomize_position()
                         while food.position in snake.body:
                             food.randomize_position()
-                        score = 1
-                        game_over = False
-                        game_over_menu_position = 0
 
-                # Handle game complete menu
-                if event.type == pygame.KEYDOWN and game_complete:
-                    if event.key == pygame.K_UP or event.key == pygame.K_DOWN:
-                        complete_menu_position = 1 - complete_menu_position
-                    elif event.key == pygame.K_RETURN:
-                        if complete_menu_position == 0:  # Restart
-                            snake = Snake()
-                            food = Food()
-                            while food.position in snake.body:
-                                food.randomize_position()
-                            score = 1
-                            game_complete = False
-                            complete_menu_position = 0
-                        else:  # Main menu
-                            return  # Return to main menu (restart main function)
-                    elif event.key == pygame.K_r:
-                        # R key restarts regardless of cursor position
-                        snake = Snake()
-                        food = Food()
-                        while food.position in snake.body:
-                            food.randomize_position()
-                        score = 1
-                        game_complete = False
-                        complete_menu_position = 0
+                # Check collisions (Classic mode only)
+                if mode == CLASSIC and snake.check_collision():
+                    game_over = True
+                    menu_position = 0
 
-            # Clear screen
-            screen.fill(BLACK)
+        # Draw
+        screen.fill(BLACK)
+        draw_grid(screen)
+        snake.draw(screen)
+        if not game_complete:
+            food.draw(screen)
 
-            # Draw grid
-            draw_grid(screen)
+        draw_text(screen, f"Score: {score}", 36, WINDOW_WIDTH // 2, 30)
+        draw_text(screen, f"Mode: {mode.upper()}", 28, 80, WINDOW_HEIGHT - 20, GRAY)
 
-            # Draw game objects
-            snake.draw(screen)
-            if not game_complete:
-                food.draw(screen)
+        if game_over:
+            draw_overlay_menu(screen, "GAME OVER!", menu_position)
+        elif game_complete:
+            draw_overlay_menu(screen, "CONGRATULATIONS!", menu_position, "Board Complete!")
 
-            # Draw score and mode
-            draw_text(screen, f"Score: {score}", 36, WINDOW_WIDTH // 2, 30)
-            draw_text(screen, f"Mode: {mode.upper()}", 28, 80, WINDOW_HEIGHT - 20, GRAY)
+        pygame.display.flip()
+        clock.tick(FPS)
 
-            # Draw game over message
-            if game_over:
-                draw_text(
-                    screen, "GAME OVER!", 72, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 80
-                )
-
-                # Menu options
-                restart_color = WHITE if game_over_menu_position == 0 else GRAY
-                menu_color = WHITE if game_over_menu_position == 1 else GRAY
-                cursor_restart = "> " if game_over_menu_position == 0 else "  "
-                cursor_menu = "> " if game_over_menu_position == 1 else "  "
-
-                draw_text(
-                    screen, cursor_restart + "Restart", 36, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 20, restart_color
-                )
-                draw_text(
-                    screen, cursor_menu + "Main Menu", 36, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 60, menu_color
-                )
-                draw_text(
-                    screen, "Press R to restart, ENTER to confirm", 24, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 110, GRAY
-                )
-
-            # Draw game complete message
-            if game_complete:
-                draw_text(
-                    screen, "CONGRATULATIONS!", 72, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 80
-                )
-                draw_text(
-                    screen, "Board Complete!", 48, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 20
-                )
-
-                # Menu options
-                restart_color = WHITE if complete_menu_position == 0 else GRAY
-                menu_color = WHITE if complete_menu_position == 1 else GRAY
-                cursor_restart = "> " if complete_menu_position == 0 else "  "
-                cursor_menu = "> " if complete_menu_position == 1 else "  "
-
-                draw_text(
-                    screen, cursor_restart + "Restart", 36, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 40, restart_color
-                )
-                draw_text(
-                    screen, cursor_menu + "Main Menu", 36, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 80, menu_color
-                )
-                draw_text(
-                    screen, "Press R to restart, ENTER to confirm", 24, WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 130, GRAY
-                )
-
-            # Update display
-            pygame.display.flip()
-
-            # Control frame rate (higher for responsiveness)
-            clock.tick(60)
-
-    # Quit game
     pygame.quit()
     sys.exit()
 
