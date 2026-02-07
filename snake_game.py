@@ -11,8 +11,8 @@ from pydantic import BaseModel, computed_field
 WINDOW_WIDTH = 800  # Fixed window width
 WINDOW_HEIGHT = 800  # Fixed window height
 GRID_SIZE = 20  # Size of each grid cell in pixels
-DEFAULT_BOARD_COLS = 20  # Default number of columns (horizontal cells)
-DEFAULT_BOARD_ROWS = 20  # Default number of rows (vertical cells)
+DEFAULT_BOARD_WIDTH = 20  # Default board width (horizontal cells)
+DEFAULT_BOARD_HEIGHT = 20  # Default board height (vertical cells)
 MIN_BOARD_SIZE = 6  # Minimum board size
 MAX_BOARD_SIZE = 32  # Maximum board size
 
@@ -29,8 +29,9 @@ FPS = 60  # Frame rate for rendering
 SNAKE_MOVE_INTERVAL = 1000 // 6  # Snake moves 6 times per second (166.67ms)
 
 # Game Modes
-CLASSIC = "classic"
-RELAXED = "relaxed"
+CLASSIC = "classic"  # 클래식 모드
+RELAXED = "relaxed"  # 릴랙스 모드
+MUSEUM = "museum"  # 관람 모드
 
 # Directions
 UP = (0, -1)
@@ -41,18 +42,18 @@ RIGHT = (1, 0)
 
 class GameConfig(BaseModel):
     mode: str = CLASSIC
-    board_cols: int = DEFAULT_BOARD_COLS
-    board_rows: int = DEFAULT_BOARD_ROWS
+    board_width: int = DEFAULT_BOARD_WIDTH
+    board_height: int = DEFAULT_BOARD_HEIGHT
 
     @computed_field
     @property
     def offset_x(self) -> int:
-        return (WINDOW_WIDTH - self.board_cols * GRID_SIZE) // 2
+        return (WINDOW_WIDTH - self.board_width * GRID_SIZE) // 2
 
     @computed_field
     @property
     def offset_y(self) -> int:
-        return (WINDOW_HEIGHT - self.board_rows * GRID_SIZE) // 2
+        return (WINDOW_HEIGHT - self.board_height * GRID_SIZE) // 2
 
 
 class TextLabel:
@@ -77,11 +78,14 @@ class TextLabel:
 
 
 class Snake:
-    def __init__(self, config):
+    def __init__(self, config, start_pos=None, start_direction=None):
         self.config = config
-        self.body = [(config.board_cols // 2, config.board_rows // 2)]
-        self.direction = RIGHT
-        self.last_moved_direction = RIGHT
+        if start_pos is not None:
+            self.body = [start_pos]
+        else:
+            self.body = [(config.board_width // 2, config.board_height // 2)]
+        self.direction = start_direction or RIGHT
+        self.last_moved_direction = self.direction
         self.grow_pending = False
 
     def move(self):
@@ -114,9 +118,9 @@ class Snake:
         head_x, head_y = self.body[0]
         if (
             head_x < 0
-            or head_x >= self.config.board_cols
+            or head_x >= self.config.board_width
             or head_y < 0
-            or head_y >= self.config.board_rows
+            or head_y >= self.config.board_height
         ):
             return True
         if self.body[0] in self.body[1:]:
@@ -128,9 +132,9 @@ class Snake:
         new_head = (head_x + direction[0], head_y + direction[1])
         if (
             new_head[0] < 0
-            or new_head[0] >= self.config.board_cols
+            or new_head[0] >= self.config.board_width
             or new_head[1] < 0
-            or new_head[1] >= self.config.board_rows
+            or new_head[1] >= self.config.board_height
         ):
             return False
         if new_head in self.body:
@@ -179,8 +183,8 @@ class Food:
 
     def randomize_position(self):
         self.position = (
-            random.randint(0, self.config.board_cols - 1),
-            random.randint(0, self.config.board_rows - 1),
+            random.randint(0, self.config.board_width - 1),
+            random.randint(0, self.config.board_height - 1),
         )
 
     def draw(self, surface):
@@ -198,9 +202,53 @@ def grid_rect(x, y, config):
     )
 
 
+class MuseumAlgorithm:
+    """관람 모드 알고리즘 기반 클래스"""
+
+    name: str = ""
+
+    def can_run(self, width: int, height: int) -> bool:
+        raise NotImplementedError
+
+    def generate_path(self, width: int, height: int) -> list[tuple[int, int]]:
+        """해밀턴 순환 경로를 반환한다. path[-1]과 path[0]은 인접해야 한다."""
+        raise NotImplementedError
+
+    def constraint_message(self) -> str:
+        return ""
+
+
+class CombAlgorithm(MuseumAlgorithm):
+    name = "COMB"
+
+    def can_run(self, width: int, height: int) -> bool:
+        return height % 2 == 0
+
+    def constraint_message(self) -> str:
+        return "Height must be even"
+
+    def generate_path(self, width: int, height: int) -> list[tuple[int, int]]:
+        path = []
+        # Phase 1: 왼쪽 열 상승
+        for y in range(height - 1, -1, -1):
+            path.append((0, y))
+        # Phase 2: 나머지 열 지그재그
+        for row in range(height):
+            if row % 2 == 0:
+                for x in range(1, width):
+                    path.append((x, row))
+            else:
+                for x in range(width - 1, 0, -1):
+                    path.append((x, row))
+        return path
+
+
+ALGORITHMS = [CombAlgorithm()]
+
+
 def draw_grid(surface, config):
-    board_pixel_width = config.board_cols * GRID_SIZE
-    board_pixel_height = config.board_rows * GRID_SIZE
+    board_pixel_width = config.board_width * GRID_SIZE
+    board_pixel_height = config.board_height * GRID_SIZE
     for x in range(0, board_pixel_width + 1, GRID_SIZE):
         pygame.draw.line(
             surface,
@@ -301,30 +349,34 @@ class ScreenManager:
 
 
 class ModeSelectionScreen(Screen):
+    _board_width = DEFAULT_BOARD_WIDTH
+    _board_height = DEFAULT_BOARD_HEIGHT
+
     def __init__(self, manager):
         super().__init__(manager)
         self.selected_mode = CLASSIC
-        self.cursor_position = 0  # 0=classic, 1=relaxed, 2=cols, 3=rows
-        self.board_cols = DEFAULT_BOARD_COLS
-        self.board_rows = DEFAULT_BOARD_ROWS
+        self.cursor_position = 0  # 0=classic, 1=relaxed, 2=museum, 3=width, 4=height
+        self.board_width = ModeSelectionScreen._board_width
+        self.board_height = ModeSelectionScreen._board_height
 
         self.label_title = TextLabel("SNAKE GAME", 72, WINDOW_WIDTH // 2, 120)
         self.label_hint = TextLabel(
             "Arrow keys, ENTER on mode to start", 24, WINDOW_WIDTH // 2, 180, GRAY
         )
         self.label_mode_header = TextLabel("GAME MODE", 48, WINDOW_WIDTH // 2, 260)
-        self.label_size_header = TextLabel("BOARD SIZE", 48, WINDOW_WIDTH // 2, 470)
+        self.label_size_header = TextLabel("BOARD SIZE", 48, WINDOW_WIDTH // 2, 520)
         self.label_classic = TextLabel(
             "  CLASSIC MODE", 38, WINDOW_WIDTH // 2, 320, GRAY
         )
         self.label_relaxed = TextLabel(
             "  RELAXED MODE", 38, WINDOW_WIDTH // 2, 370, GRAY
         )
-        self.label_cols = TextLabel(
-            "  Columns: 20 cells", 32, WINDOW_WIDTH // 2, 530, GRAY
+        self.label_museum = TextLabel("  MUSEUM MODE", 38, WINDOW_WIDTH // 2, 420, GRAY)
+        self.label_width = TextLabel(
+            "  Width:  20 cells", 32, WINDOW_WIDTH // 2, 580, GRAY
         )
-        self.label_rows = TextLabel(
-            "  Rows:    20 cells", 32, WINDOW_WIDTH // 2, 580, GRAY
+        self.label_height = TextLabel(
+            "  Height: 20 cells", 32, WINDOW_WIDTH // 2, 630, GRAY
         )
 
     def on_enter(self):
@@ -335,14 +387,14 @@ class ModeSelectionScreen(Screen):
             return
 
         if event.key == pygame.K_UP:
-            self.cursor_position = (self.cursor_position - 1) % 4
+            self.cursor_position = (self.cursor_position - 1) % 5
             if self.cursor_position == 0:
                 self.selected_mode = CLASSIC
             elif self.cursor_position == 1:
                 self.selected_mode = RELAXED
 
         elif event.key == pygame.K_DOWN:
-            self.cursor_position = (self.cursor_position + 1) % 4
+            self.cursor_position = (self.cursor_position + 1) % 5
             if self.cursor_position == 0:
                 self.selected_mode = CLASSIC
             elif self.cursor_position == 1:
@@ -351,27 +403,37 @@ class ModeSelectionScreen(Screen):
         elif event.key == pygame.K_LEFT:
             shift_pressed = pygame.key.get_mods() & pygame.KMOD_SHIFT
             step = 10 if shift_pressed else 1
-            if self.cursor_position == 2:
-                self.board_cols = max(MIN_BOARD_SIZE, self.board_cols - step)
-            elif self.cursor_position == 3:
-                self.board_rows = max(MIN_BOARD_SIZE, self.board_rows - step)
+            if self.cursor_position == 3:
+                self.board_width = max(MIN_BOARD_SIZE, self.board_width - step)
+                ModeSelectionScreen._board_width = self.board_width
+            elif self.cursor_position == 4:
+                self.board_height = max(MIN_BOARD_SIZE, self.board_height - step)
+                ModeSelectionScreen._board_height = self.board_height
 
         elif event.key == pygame.K_RIGHT:
             shift_pressed = pygame.key.get_mods() & pygame.KMOD_SHIFT
             step = 10 if shift_pressed else 1
-            if self.cursor_position == 2:
-                self.board_cols = min(MAX_BOARD_SIZE, self.board_cols + step)
-            elif self.cursor_position == 3:
-                self.board_rows = min(MAX_BOARD_SIZE, self.board_rows + step)
+            if self.cursor_position == 3:
+                self.board_width = min(MAX_BOARD_SIZE, self.board_width + step)
+                ModeSelectionScreen._board_width = self.board_width
+            elif self.cursor_position == 4:
+                self.board_height = min(MAX_BOARD_SIZE, self.board_height + step)
+                ModeSelectionScreen._board_height = self.board_height
 
         elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
             if self.cursor_position in (0, 1):
                 config = GameConfig(
                     mode=self.selected_mode,
-                    board_cols=self.board_cols,
-                    board_rows=self.board_rows,
+                    board_width=self.board_width,
+                    board_height=self.board_height,
                 )
                 self.manager.replace(GameplayScreen(self.manager, config))
+            elif self.cursor_position == 2:
+                self.manager.push(
+                    AlgorithmSelectionScreen(
+                        self.manager, self.board_width, self.board_height
+                    )
+                )
 
     def draw(self, surface):
         surface.fill(BLACK)
@@ -384,16 +446,20 @@ class ModeSelectionScreen(Screen):
         relaxed_color = WHITE if self.cursor_position == 1 else GRAY
         self.label_relaxed.update(cursor_relaxed + "RELAXED MODE", relaxed_color)
 
-        cursor_cols = "> " if self.cursor_position == 2 else "  "
-        cols_color = WHITE if self.cursor_position == 2 else GRAY
-        self.label_cols.update(
-            cursor_cols + f"Columns: {self.board_cols} cells", cols_color
+        cursor_museum = "> " if self.cursor_position == 2 else "  "
+        museum_color = WHITE if self.cursor_position == 2 else GRAY
+        self.label_museum.update(cursor_museum + "MUSEUM MODE", museum_color)
+
+        cursor_width = "> " if self.cursor_position == 3 else "  "
+        width_color = WHITE if self.cursor_position == 3 else GRAY
+        self.label_width.update(
+            cursor_width + f"Width:  {self.board_width} cells", width_color
         )
 
-        cursor_rows = "> " if self.cursor_position == 3 else "  "
-        rows_color = WHITE if self.cursor_position == 3 else GRAY
-        self.label_rows.update(
-            cursor_rows + f"Rows:    {self.board_rows} cells", rows_color
+        cursor_height = "> " if self.cursor_position == 4 else "  "
+        height_color = WHITE if self.cursor_position == 4 else GRAY
+        self.label_height.update(
+            cursor_height + f"Height: {self.board_height} cells", height_color
         )
 
         self.label_title.draw(surface)
@@ -401,22 +467,103 @@ class ModeSelectionScreen(Screen):
         self.label_mode_header.draw(surface)
         self.label_classic.draw(surface)
         self.label_relaxed.draw(surface)
+        self.label_museum.draw(surface)
         self.label_size_header.draw(surface)
 
-        box_rect = pygame.Rect(WINDOW_WIDTH // 2 - 150, 510, 300, 90)
+        box_rect = pygame.Rect(WINDOW_WIDTH // 2 - 150, 560, 300, 90)
         pygame.draw.rect(surface, GRAY, box_rect, 2)
 
-        self.label_cols.draw(surface)
-        self.label_rows.draw(surface)
+        self.label_width.draw(surface)
+        self.label_height.draw(surface)
+
+
+class AlgorithmSelectionScreen(Screen):
+    def __init__(self, manager, board_width, board_height):
+        super().__init__(manager)
+        self.board_width = board_width
+        self.board_height = board_height
+        self.cursor_position = 0
+
+        self.label_title = TextLabel("MUSEUM MODE", 72, WINDOW_WIDTH // 2, 120)
+        self.label_hint = TextLabel(
+            "ENTER to select, ESC to go back", 24, WINDOW_WIDTH // 2, 180, GRAY
+        )
+        self.label_algo_header = TextLabel("ALGORITHM", 48, WINDOW_WIDTH // 2, 280)
+        self.label_constraint = TextLabel("", 24, WINDOW_WIDTH // 2, 420, RED)
+        self._algo_labels = []
+        for i, algo in enumerate(ALGORITHMS):
+            label = TextLabel(
+                f"  {algo.name}", 38, WINDOW_WIDTH // 2, 340 + i * 50, GRAY
+            )
+            self._algo_labels.append(label)
+
+    def on_enter(self):
+        pygame.display.set_caption("Simple Snake Game - Museum Mode")
+
+    def handle_event(self, event):
+        if event.type != pygame.KEYDOWN:
+            return
+
+        if event.key == pygame.K_ESCAPE:
+            self.manager.pop()
+
+        elif event.key == pygame.K_UP:
+            self.cursor_position = (self.cursor_position - 1) % len(ALGORITHMS)
+
+        elif event.key == pygame.K_DOWN:
+            self.cursor_position = (self.cursor_position + 1) % len(ALGORITHMS)
+
+        elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+            algo = ALGORITHMS[self.cursor_position]
+            if algo.can_run(self.board_width, self.board_height):
+                path = algo.generate_path(self.board_width, self.board_height)
+                config = GameConfig(
+                    mode=MUSEUM,
+                    board_width=self.board_width,
+                    board_height=self.board_height,
+                )
+                self.manager.replace_all(
+                    GameplayScreen(self.manager, config, algorithm_path=path)
+                )
+
+    def draw(self, surface):
+        surface.fill(BLACK)
+
+        self.label_title.draw(surface)
+        self.label_hint.draw(surface)
+        self.label_algo_header.draw(surface)
+
+        for i, label in enumerate(self._algo_labels):
+            algo = ALGORITHMS[i]
+            selected = i == self.cursor_position
+            can_run = algo.can_run(self.board_width, self.board_height)
+            cursor = "> " if selected else "  "
+            if can_run:
+                color = WHITE if selected else GRAY
+            else:
+                color = (80, 80, 80)
+            label.update(cursor + algo.name, color)
+            label.draw(surface)
+
+        algo = ALGORITHMS[self.cursor_position]
+        if not algo.can_run(self.board_width, self.board_height):
+            self.label_constraint.update(algo.constraint_message())
+        else:
+            self.label_constraint.update("")
+        self.label_constraint.draw(surface)
 
 
 class GameplayScreen(Screen):
-    def __init__(self, manager, config):
+    def __init__(self, manager, config, algorithm_path=None):
         super().__init__(manager)
         self.config = config
+        self.algorithm_path = algorithm_path
+        self.path_index = 0
         self.snake = None
         self.food = None
         self.score = 1
+        self.move_count = 0
+        self.start_time = 0
         self.game_over = False
         self.game_complete = False
         self._should_move = False
@@ -433,15 +580,27 @@ class GameplayScreen(Screen):
         pygame.display.set_caption("Simple Snake Game")
 
     def reset_game(self):
-        self.snake = Snake(self.config)
+        if self.config.mode == MUSEUM and self.algorithm_path:
+            path = self.algorithm_path
+            start_pos = path[0]
+            nx, ny = path[1]
+            sx, sy = start_pos
+            start_dir = (nx - sx, ny - sy)
+            self.snake = Snake(self.config, start_pos, start_dir)
+            self.path_index = 0
+        else:
+            self.snake = Snake(self.config)
         self.food = Food(self.config)
         while self.food.position in self.snake.body:
             self.food.randomize_position()
         self.score = 1
+        self.move_count = 0
+        now = pygame.time.get_ticks()
+        self.start_time = now
         self.game_over = False
         self.game_complete = False
         self._should_move = False
-        self.last_move_time = pygame.time.get_ticks()
+        self.last_move_time = now
 
     def handle_event(self, event):
         if event.type != pygame.KEYDOWN:
@@ -469,9 +628,29 @@ class GameplayScreen(Screen):
                 if self.snake.change_direction(direction_input):
                     if self.snake.can_move(direction_input):
                         self._should_move = True
+            # MUSEUM: 방향 입력 무시
 
     def update(self):
         if self.game_over or self.game_complete:
+            return
+
+        if self.config.mode == MUSEUM and self.algorithm_path:
+            area = self.config.board_width * self.config.board_height
+            speed_mult = max(self.config.board_width, self.config.board_height) / 6
+            interval = 3000 / area / speed_mult
+            current_time = pygame.time.get_ticks()
+            while current_time - self.last_move_time >= interval:
+                self.last_move_time += interval
+                path = self.algorithm_path
+                n = len(path)
+                next_idx = (self.path_index + 1) % n
+                cx, cy = path[self.path_index]
+                nx, ny = path[next_idx]
+                self.snake.direction = (nx - cx, ny - cy)
+                self.path_index = next_idx
+                self._do_move()
+                if self.game_over or self.game_complete:
+                    break
             return
 
         if self.config.mode == CLASSIC:
@@ -491,41 +670,48 @@ class GameplayScreen(Screen):
         )
 
         # Check collision BEFORE moving so the snake stays within the board
-        if self.config.mode == CLASSIC:
-            cols, rows = self.config.board_cols, self.config.board_rows
+        if self.config.mode in (CLASSIC, MUSEUM):
+            w, h = self.config.board_width, self.config.board_height
             wall_hit = (
                 next_head[0] < 0
-                or next_head[0] >= cols
+                or next_head[0] >= w
                 or next_head[1] < 0
-                or next_head[1] >= rows
+                or next_head[1] >= h
             )
             if wall_hit:
                 self.game_over = True
-                self.manager.push(
-                    OverlayMenuScreen(self.manager, self, "GAME OVER!")
-                )
+                self.manager.push(OverlayMenuScreen(self.manager, self, "GAME OVER!"))
                 return
             will_eat = next_head == self.food.position
             body_after = self.snake.body if will_eat else self.snake.body[:-1]
             if next_head in body_after:
                 self.game_over = True
-                self.manager.push(
-                    OverlayMenuScreen(self.manager, self, "GAME OVER!")
-                )
+                self.manager.push(OverlayMenuScreen(self.manager, self, "GAME OVER!"))
                 return
 
         if next_head == self.food.position:
             self.snake.grow()
 
         self.snake.move()
+        self.move_count += 1
 
         if self.snake.body[0] == self.food.position:
             self.score += 1
-            if len(self.snake.body) >= self.config.board_cols * self.config.board_rows:
+            if (
+                len(self.snake.body)
+                >= self.config.board_width * self.config.board_height
+            ):
                 self.game_complete = True
+                elapsed = (pygame.time.get_ticks() - self.start_time) / 1000
+                area = self.config.board_width * self.config.board_height
+                stats = [
+                    f"Moves: {self.move_count}",
+                    f"Time: {elapsed:.1f}s",
+                    f"Efficiency: {(area - 1) / self.move_count * 100:.3g}%",
+                ]
                 self.manager.push(
                     OverlayMenuScreen(
-                        self.manager, self, "CONGRATULATIONS!", "Board Complete!"
+                        self.manager, self, "CONGRATULATIONS!", "Board Complete!", stats
                     )
                 )
             else:
@@ -548,11 +734,12 @@ class GameplayScreen(Screen):
 class OverlayMenuScreen(Screen):
     """Rendered on top of GameplayScreen. Does NOT fill the background."""
 
-    def __init__(self, manager, gameplay, title, subtitle=None):
+    def __init__(self, manager, gameplay, title, subtitle=None, stats=None):
         super().__init__(manager)
         self.gameplay = gameplay
         self.title = title
         self.subtitle = subtitle
+        self.stats = stats or []
         self.menu_position = 0  # 0=restart, 1=main menu
 
         center_y = WINDOW_HEIGHT // 2
@@ -560,6 +747,7 @@ class OverlayMenuScreen(Screen):
         self.label_subtitle = TextLabel(
             subtitle or "", 48, WINDOW_WIDTH // 2, center_y - 20
         )
+        self.stat_labels = [TextLabel(s, 28, 0, 0, WHITE) for s in self.stats]
         self.label_restart = TextLabel("> Restart", 36, WINDOW_WIDTH // 2, 0, WHITE)
         self.label_menu = TextLabel("  Main Menu", 36, WINDOW_WIDTH // 2, 0, GRAY)
         self.label_hint = TextLabel(
@@ -594,9 +782,14 @@ class OverlayMenuScreen(Screen):
 
         if self.subtitle:
             self.label_subtitle.draw(surface)
-            y_base = center_y + 40
+            y_base = center_y + 20
         else:
             y_base = center_y + 20
+
+        for i, label in enumerate(self.stat_labels):
+            label.x = WINDOW_WIDTH - 100
+            label.y = WINDOW_HEIGHT - 30 - (len(self.stat_labels) - 1 - i) * 28
+            label.draw(surface)
 
         cursor_restart = "> " if self.menu_position == 0 else "  "
         cursor_menu = "> " if self.menu_position == 1 else "  "
