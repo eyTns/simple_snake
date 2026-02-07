@@ -459,17 +459,40 @@ class GameplayScreen(Screen):
             self._do_move()
 
     def _do_move(self):
-        # Check if next position has food
         next_head = (
             self.snake.body[0][0] + self.snake.direction[0],
             self.snake.body[0][1] + self.snake.direction[1],
         )
+
+        # Check collision BEFORE moving so the snake stays within the board
+        if self.config.mode == CLASSIC:
+            cols, rows = self.config.board_cols, self.config.board_rows
+            wall_hit = (
+                next_head[0] < 0
+                or next_head[0] >= cols
+                or next_head[1] < 0
+                or next_head[1] >= rows
+            )
+            if wall_hit:
+                self.game_over = True
+                self.manager.push(
+                    OverlayMenuScreen(self.manager, self, "GAME OVER!")
+                )
+                return
+            will_eat = next_head == self.food.position
+            body_after = self.snake.body if will_eat else self.snake.body[:-1]
+            if next_head in body_after:
+                self.game_over = True
+                self.manager.push(
+                    OverlayMenuScreen(self.manager, self, "GAME OVER!")
+                )
+                return
+
         if next_head == self.food.position:
             self.snake.grow()
 
         self.snake.move()
 
-        # Check if food was eaten
         if self.snake.body[0] == self.food.position:
             self.score += 1
             if len(self.snake.body) >= self.config.board_cols * self.config.board_rows:
@@ -483,15 +506,6 @@ class GameplayScreen(Screen):
                 self.food.randomize_position()
                 while self.food.position in self.snake.body:
                     self.food.randomize_position()
-
-        # Check collisions (Classic mode only)
-        if (
-            not self.game_complete
-            and self.config.mode == CLASSIC
-            and self.snake.check_collision()
-        ):
-            self.game_over = True
-            self.manager.push(OverlayMenuScreen(self.manager, self, "GAME OVER!"))
 
     def draw(self, surface):
         surface.fill(BLACK)
