@@ -20,6 +20,7 @@ MAX_BOARD_SIZE = 32  # Maximum board size
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 GREEN = (0, 255, 0)
+GREEN_HEAD = (0, 180, 0)
 RED = (255, 0, 0)
 GRAY = (40, 40, 40)
 
@@ -137,10 +138,35 @@ class Snake:
         return True
 
     def draw(self, surface):
-        for segment in self.body:
-            pygame.draw.rect(
-                surface, GREEN, grid_rect(segment[0], segment[1], self.config)
-            )
+        padding = 3
+        body_size = GRID_SIZE - 2 * padding
+        ox, oy = self.config.offset_x, self.config.offset_y
+
+        # Draw bridges between consecutive segments
+        for i in range(len(self.body) - 1):
+            gx1, gy1 = self.body[i]
+            gx2, gy2 = self.body[i + 1]
+            if gy1 == gy2:  # horizontal
+                min_gx = min(gx1, gx2)
+                bx = ox + min_gx * GRID_SIZE + padding + body_size
+                by = oy + gy1 * GRID_SIZE + padding
+                pygame.draw.rect(
+                    surface, GREEN, pygame.Rect(bx, by, 2 * padding, body_size)
+                )
+            else:  # vertical
+                min_gy = min(gy1, gy2)
+                bx = ox + gx1 * GRID_SIZE + padding
+                by = oy + min_gy * GRID_SIZE + padding + body_size
+                pygame.draw.rect(
+                    surface, GREEN, pygame.Rect(bx, by, body_size, 2 * padding)
+                )
+
+        # Draw core body for each segment
+        for i, (gx, gy) in enumerate(self.body):
+            x = ox + gx * GRID_SIZE + padding
+            y = oy + gy * GRID_SIZE + padding
+            color = GREEN_HEAD if i == 0 else GREEN
+            pygame.draw.rect(surface, color, pygame.Rect(x, y, body_size, body_size))
 
 
 class Food:
