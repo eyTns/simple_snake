@@ -2,6 +2,8 @@
 Simple Snake Game using Pygame
 """
 
+from collections import deque
+
 import pygame
 import sys
 import random
@@ -105,14 +107,15 @@ class Snake:
         self.grow_pending = True
 
     def change_direction(self, new_direction):
-        opposite_of_last_move = (
-            self.last_moved_direction[0] * -1,
-            self.last_moved_direction[1] * -1,
-        )
-        if new_direction != opposite_of_last_move:
-            self.direction = new_direction
-            return True
-        return False
+        if len(self.body) > 1:
+            opposite_of_last_move = (
+                self.last_moved_direction[0] * -1,
+                self.last_moved_direction[1] * -1,
+            )
+            if new_direction == opposite_of_last_move:
+                return False
+        self.direction = new_direction
+        return True
 
     def check_collision(self):
         head_x, head_y = self.body[0]
@@ -206,16 +209,28 @@ class MuseumAlgorithm:
     """관람 모드 알고리즘 기반 클래스"""
 
     name: str = ""
+    dynamic: bool = False
 
     def can_run(self, width: int, height: int) -> bool:
         raise NotImplementedError
 
     def generate_path(self, width: int, height: int) -> list[tuple[int, int]]:
-        """해밀턴 순환 경로를 반환한다. path[-1]과 path[0]은 인접해야 한다."""
         raise NotImplementedError
 
     def constraint_message(self) -> str:
         return ""
+
+    def initialize(
+        self, width: int, height: int
+    ) -> tuple[tuple[int, int], tuple[int, int]]:
+        """동적 알고리즘 초기화. (start_pos, start_dir)을 반환합니다."""
+        raise NotImplementedError
+
+    def next_position(
+        self, snake_body: list, food_pos: tuple
+    ) -> tuple[int, int] | None:
+        """다음 이동 위치를 반환합니다. 없으면 None."""
+        raise NotImplementedError
 
 
 class CombAlgorithm(MuseumAlgorithm):
@@ -243,7 +258,120 @@ class CombAlgorithm(MuseumAlgorithm):
         return path
 
 
-ALGORITHMS = [CombAlgorithm()]
+class FishboneAlgorithm(MuseumAlgorithm):
+    name = "FISHBONE"
+    dynamic = True
+    debug = False
+
+    def can_run(self, width: int, height: int) -> bool:
+        return height % 2 == 0
+
+    def constraint_message(self) -> str:
+        return "Height must be even"
+
+    def initialize(
+        self, width: int, height: int
+    ) -> tuple[tuple[int, int], tuple[int, int]]:
+        self._width = width
+        self._height = height
+        self._mid = width // 2
+        self._num_ribs = height // 2
+        self._queue: deque[tuple[int, int]] = deque()
+        self._phase = "left"
+        self._rib_index = 0
+        # 첫 rib을 enqueue하고 시작 위치를 꺼낸다
+        self._enqueue_rib_cells("left", 0, self._mid - 1)
+        self._rib_index = 1
+        start_pos = self._queue.popleft()
+        next_pos = self._queue[0]
+        start_dir = (next_pos[0] - start_pos[0], next_pos[1] - start_pos[1])
+        return start_pos, start_dir
+
+    def next_position(
+        self, snake_body: list, food_pos: tuple
+    ) -> tuple[int, int] | None:
+        if not self._queue:
+            self._enqueue_next(snake_body, food_pos)
+        if self._queue:
+            return self._queue.popleft()
+        return None
+
+    def _rib_bounds(self, side: str, rib_index: int) -> tuple[int, int, int, int]:
+        """rib 경계를 (x_min, x_max, y_min, y_max)로 반환합니다."""
+        if side == "left":
+            top_row = self._height - 1 - rib_index * 2
+            return (0, self._mid - 1, top_row - 1, top_row)
+        top_row = rib_index * 2
+        return (self._mid, self._width - 1, top_row, top_row + 1)
+
+    def _next_rib(self, side: str, rib_index: int) -> tuple[str, int]:
+        """다음 rib의 (side, index)를 반환합니다."""
+        if side == "left":
+            if rib_index + 1 < self._num_ribs:
+                return ("left", rib_index + 1)
+            return ("right", 0)
+        if rib_index + 1 < self._num_ribs:
+            return ("right", rib_index + 1)
+        return ("left", 0)
+
+    def _pos_depth(self, pos: tuple, side: str, rib_index: int) -> int:
+        """pos의 spine으로부터의 깊이를 반환합니다. rib 범위 밖이면 0."""
+        x0, x1, y0, y1 = self._rib_bounds(side, rib_index)
+        if not (y0 <= pos[1] <= y1 and x0 <= pos[0] <= x1):
+            return 0
+        if side == "left":
+            return (self._mid - 1) - pos[0]
+        return pos[0] - self._mid
+
+    def rib_depth(
+        self, side: str, rib_index: int, snake_body: list, food_pos: tuple
+    ) -> int:
+        """이 rib에서 spine으로부터 몇 칸 깊이까지 갈지 결정합니다."""
+        max_depth = (self._mid - 1) if side == "left" else (self._width - 1 - self._mid)
+        body_d = max(
+            (self._pos_depth(seg, side, rib_index) for seg in snake_body), default=-2
+        )
+        food_d = self._pos_depth(food_pos, side, rib_index)
+        depth = max(0, body_d, food_d)
+        if depth >= max_depth - 2:
+            depth = max_depth
+        if depth > 0:  # 현재 가장 빠름
+            depth = max_depth
+        if self.debug:
+            print(
+                f"rib_depth({side}, {rib_index}): body_d={body_d}, food_d={food_d}, depth={depth}, max={max_depth}"
+            )
+        return depth
+
+    def _enqueue_rib_cells(self, side: str, rib_index: int, depth: int):
+        """rib 셀들을 depth만큼 queue에 추가합니다."""
+        if side == "left":
+            top_row = self._height - 1 - rib_index * 2
+            bottom_row = top_row - 1
+            spine = self._mid - 1
+            far = spine - depth
+            for x in range(spine, far - 1, -1):
+                self._queue.append((x, top_row))
+            for x in range(far, spine + 1):
+                self._queue.append((x, bottom_row))
+        else:
+            top_row = rib_index * 2
+            bottom_row = top_row + 1
+            spine = self._mid
+            far = spine + depth
+            for x in range(spine, far + 1):
+                self._queue.append((x, top_row))
+            for x in range(far, spine - 1, -1):
+                self._queue.append((x, bottom_row))
+
+    def _enqueue_next(self, snake_body: list, food_pos: tuple):
+        """다음 rib을 판단하여 queue에 추가합니다."""
+        depth = self.rib_depth(self._phase, self._rib_index, snake_body, food_pos)
+        self._enqueue_rib_cells(self._phase, self._rib_index, depth)
+        self._phase, self._rib_index = self._next_rib(self._phase, self._rib_index)
+
+
+ALGORITHMS = [CombAlgorithm(), FishboneAlgorithm()]
 
 
 def draw_grid(surface, config):
@@ -516,15 +644,20 @@ class AlgorithmSelectionScreen(Screen):
         elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
             algo = ALGORITHMS[self.cursor_position]
             if algo.can_run(self.board_width, self.board_height):
-                path = algo.generate_path(self.board_width, self.board_height)
                 config = GameConfig(
                     mode=MUSEUM,
                     board_width=self.board_width,
                     board_height=self.board_height,
                 )
-                self.manager.replace_all(
-                    GameplayScreen(self.manager, config, algorithm_path=path)
-                )
+                if algo.dynamic:
+                    self.manager.replace_all(
+                        GameplayScreen(self.manager, config, algorithm=algo)
+                    )
+                else:
+                    path = algo.generate_path(self.board_width, self.board_height)
+                    self.manager.replace_all(
+                        GameplayScreen(self.manager, config, algorithm_path=path)
+                    )
 
     def draw(self, surface):
         surface.fill(BLACK)
@@ -554,10 +687,11 @@ class AlgorithmSelectionScreen(Screen):
 
 
 class GameplayScreen(Screen):
-    def __init__(self, manager, config, algorithm_path=None):
+    def __init__(self, manager, config, algorithm_path=None, algorithm=None):
         super().__init__(manager)
         self.config = config
         self.algorithm_path = algorithm_path
+        self.algorithm = algorithm
         self.path_index = 0
         self.snake = None
         self.food = None
@@ -580,7 +714,12 @@ class GameplayScreen(Screen):
         pygame.display.set_caption("Simple Snake Game")
 
     def reset_game(self):
-        if self.config.mode == MUSEUM and self.algorithm_path:
+        if self.config.mode == MUSEUM and self.algorithm:
+            start_pos, start_dir = self.algorithm.initialize(
+                self.config.board_width, self.config.board_height
+            )
+            self.snake = Snake(self.config, start_pos, start_dir)
+        elif self.config.mode == MUSEUM and self.algorithm_path:
             path = self.algorithm_path
             start_pos = path[0]
             nx, ny = path[1]
@@ -634,20 +773,32 @@ class GameplayScreen(Screen):
         if self.game_over or self.game_complete:
             return
 
-        if self.config.mode == MUSEUM and self.algorithm_path:
+        if self.config.mode == MUSEUM and (self.algorithm or self.algorithm_path):
             area = self.config.board_width * self.config.board_height
             speed_mult = max(self.config.board_width, self.config.board_height) / 6
             interval = 3000 / area / speed_mult
             current_time = pygame.time.get_ticks()
             while current_time - self.last_move_time >= interval:
                 self.last_move_time += interval
-                path = self.algorithm_path
-                n = len(path)
-                next_idx = (self.path_index + 1) % n
-                cx, cy = path[self.path_index]
-                nx, ny = path[next_idx]
-                self.snake.direction = (nx - cx, ny - cy)
-                self.path_index = next_idx
+                if self.algorithm:
+                    next_pos = self.algorithm.next_position(
+                        self.snake.body, self.food.position
+                    )
+                    if next_pos is None:
+                        break
+                    head = self.snake.body[0]
+                    self.snake.direction = (
+                        next_pos[0] - head[0],
+                        next_pos[1] - head[1],
+                    )
+                else:
+                    path = self.algorithm_path
+                    n = len(path)
+                    next_idx = (self.path_index + 1) % n
+                    cx, cy = path[self.path_index]
+                    nx, ny = path[next_idx]
+                    self.snake.direction = (nx - cx, ny - cy)
+                    self.path_index = next_idx
                 self._do_move()
                 if self.game_over or self.game_complete:
                     break
@@ -697,6 +848,10 @@ class GameplayScreen(Screen):
 
         if self.snake.body[0] == self.food.position:
             self.score += 1
+            if self.algorithm and getattr(self.algorithm, "debug", False):
+                print(
+                    f"ate food at {self.food.position}, score={self.score}, tail={self.snake.body[-1]}, len={len(self.snake.body)}"
+                )
             if (
                 len(self.snake.body)
                 >= self.config.board_width * self.config.board_height
